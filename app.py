@@ -18,13 +18,6 @@ st.set_page_config(layout="wide")
 # 🔧 FUNCIONES
 # ================================
 
-_sheet_cache = {}
-
-def get_cached_sheet(sheet_id):
-    if sheet_id not in _sheet_cache:
-        _sheet_cache[sheet_id] = get_sheet(sheet_id)
-    return _sheet_cache[sheet_id]
-
 def to_csv(df):
     return df.to_csv(index=False, sep=";", encoding="utf-8-sig", decimal=",")
 
@@ -46,7 +39,7 @@ def asegurar_estructura(sheet):
     for nombre_hoja, headers in estructura.items():
         ws = sheet.worksheet(nombre_hoja)
         try:
-            ws.update('A1', [headers])
+            ws.update(values=[headers], range_name='A1')
         except Exception:
             pass
 
@@ -159,8 +152,7 @@ if not st.session_state["login"]:
 
 st.title("📦 Inventario")
 
-sheet = get_cached_sheet(st.session_state["sheet_id"])
-st.session_state["sheet"] = sheet
+sheet = get_sheet(st.session_state["sheet_id"])
 
 if "init" not in st.session_state:
     asegurar_estructura(sheet)
