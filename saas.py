@@ -2,6 +2,7 @@ import gspread
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+PLANTILLA_ID="1xYqekASZvMXlxLyEK08_lCeoC5fSVZolZMWijYE94Lg"
 
 # ---------------------------
 # CONEXIÓN GSPREAD DESDE OAUTH
@@ -156,8 +157,8 @@ def crear_entorno_cliente(service, credentials, nombre_cliente):
         PARENT_FOLDER_ID
     )
 
-    # 📄 Crear Sheet dentro de la carpeta
-    sheet_id = crear_google_sheet(
+    # 📄 Crear Sheet desde plantilla (🔥 cambio aquí)
+    sheet_id = copiar_plantilla(
         service,
         nombre_cliente,
         folder_id
@@ -166,10 +167,8 @@ def crear_entorno_cliente(service, credentials, nombre_cliente):
     if not sheet_id:
         return None
 
-    # 🧱 Inicializar estructura
-    inicializar_estructura(sheet_id, credentials)
-
     return sheet_id
+
 def crear_carpeta_cliente(service, nombre_cliente, parent_folder_id):
     file_metadata = {
         'name': nombre_cliente,
@@ -184,16 +183,15 @@ def crear_carpeta_cliente(service, nombre_cliente, parent_folder_id):
 
     return folder.get('id')
 
-def crear_google_sheet(service, nombre_cliente, folder_id):
+def copiar_plantilla(service, nombre_cliente, folder_id):
     file_metadata = {
         'name': f"{nombre_cliente} - Inventario",
-        'mimeType': 'application/vnd.google-apps.spreadsheet',
-        'parents': [folder_id]  # 🔥 AQUÍ
+        'parents': [folder_id]
     }
 
-    file = service.files().create(
-        body=file_metadata,
-        fields='id'
+    copied_file = service.files().copy(
+        fileId=PLANTILLA_ID,
+        body=file_metadata
     ).execute()
 
-    return file.get('id')
+    return copied_file.get('id')

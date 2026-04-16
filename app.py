@@ -1,92 +1,37 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
 
 from oauth import get_credentials
 from googleapiclient.discovery import build
 from saas import crear_entorno_cliente
 from database import conectar_sheet
 
+# 🔥 NUEVO
+from data_layer import (
+    get_all_data,
+    crear_producto,
+    crear_categoria,
+    crear_unidad,
+    crear_movimiento,
+    calcular_estado_producto
+)
 
 # ================================
-# 🔧 CONFIG GLOBAL
+# CONFIG
 # ================================
 st.set_page_config(layout="wide")
 
-
 # ================================
-# 🔧 FUNCIONES
+# CONEXIÓN
 # ================================
-
-def to_csv(df):
-    return df.to_csv(index=False, sep=";", encoding="utf-8-sig", decimal=",")
-
-
 @st.cache_resource
 def get_sheet(sheet_id):
     credentials = get_credentials()
     return conectar_sheet(credentials, sheet_id)
 
-
-def asegurar_estructura(sheet):
-    estructura = {
-        "productos": ["nombre", "categoria", "unidad", "stock_min"],
-        "movimientos": ["fecha", "producto", "acción", "cantidad", "monto total", "nota"],
-        "categorias": ["nombre"],
-        "unidades": ["nombre"]
-    }
-
-    for nombre_hoja, headers in estructura.items():
-        ws = sheet.worksheet(nombre_hoja)
-        try:
-            ws.update(values=[headers], range_name='A1')
-        except Exception:
-            pass
-
-
-@st.cache_data(ttl=600)
-def load_all_data(sheet_id):
-    sheet = get_sheet(sheet_id)
-
-    data = {}
-    hojas = ["productos", "movimientos", "categorias", "unidades"]
-
-    for nombre in hojas:
-        ws = sheet.worksheet(nombre)
-        values = ws.get_all_values()
-
-        if len(values) <= 1:
-            df = pd.DataFrame()
-        else:
-            headers = [h.strip().lower() for h in values[0]]
-            df = pd.DataFrame(values[1:], columns=headers)
-
-        data[nombre] = df
-
-    if not data["movimientos"].empty:
-        df = data["movimientos"]
-        df["cantidad"] = pd.to_numeric(df["cantidad"], errors="coerce")
-        df["monto total"] = pd.to_numeric(df["monto total"], errors="coerce")
-
-    return data
-
-
-def calcular_stock(df_mov, producto):
-    if df_mov.empty or "producto" not in df_mov.columns:
-        return 0
-
-    df_p = df_mov[df_mov["producto"] == producto]
-
-    ingresos = df_p[df_p["acción"] == "Ingreso"]["cantidad"].sum()
-    salidas = df_p[df_p["acción"] == "Salida"]["cantidad"].sum()
-
-    return ingresos - salidas
-
-
 # ================================
-# 🔐 LOGIN
+# LOGIN
 # ================================
-
 if "login" not in st.session_state:
     st.session_state["login"] = False
 
@@ -109,14 +54,19 @@ def mostrar_login():
         df = pd.DataFrame(ws.get_all_records())
 
         if modo == "Login":
+            df["usuario"] = df["usuario"].astype(str).str.strip()
+            df["password"] = df["password"].astype(str).str.strip()
+
+            usuario_input = str(usuario).strip()
+            password_input = str(password).strip()
+
             user = df[
-                (df["usuario"] == usuario) &
-                (df["password"] == password)
-            ]
+                (df["usuario"] == usuario_input) &
+                (df["password"] == password_input)
+                ]
 
             if not user.empty:
                 st.session_state["login"] = True
-                st.session_state["usuario"] = usuario
                 st.session_state["sheet_id"] = user.iloc[0]["sheet_id"]
                 st.rerun()
             else:
@@ -131,52 +81,44 @@ def mostrar_login():
 
                 ws.append_row([usuario, password, sheet_id])
 
-                st.success("Cuenta creada")
                 st.session_state["login"] = True
                 st.session_state["sheet_id"] = sheet_id
                 st.rerun()
 
 
-# ================================
-# 🚪 LOGIN FLOW
-# ================================
-
 if not st.session_state["login"]:
     mostrar_login()
     st.stop()
 
-
 # ================================
-# 🟢 APP PRINCIPAL
+# APP
 # ================================
-
 st.title("📦 Inventario")
 
 sheet = get_sheet(st.session_state["sheet_id"])
 
-if "init" not in st.session_state:
-    asegurar_estructura(sheet)
-    st.session_state["init"] = True
+# 🔥 DATA CENTRALIZADA
+@st.cache_data(ttl=30)
+def load_data_cached(sheet_id):
+    sheet = get_sheet(sheet_id)
+    return get_all_data(sheet)
 
-data = load_all_data(st.session_state["sheet_id"])
+data = load_data_cached(st.session_state["sheet_id"])
 
 df_prod = data["productos"]
 df_mov = data["movimientos"]
 df_cat = data["categorias"]
 df_uni = data["unidades"]
 
-
 menu = st.radio(
-    "Menú",  # <- SOLO esto se agrega
+    "Menú",
     ["📊 Inventario", "🔄 Movimientos", "⚙️ Configuración", "📜 Historial"],
     horizontal=True
 )
 
-
 # ================================
-# 📊 INVENTARIO
+# INVENTARIO
 # ================================
-
 if menu == "📊 Inventario":
 
     if df_prod.empty:
@@ -185,190 +127,211 @@ if menu == "📊 Inventario":
     else:
         resultados = []
 
-        if not df_mov.empty:
-            df_mov["precio"] = df_mov["monto total"] / df_mov["cantidad"]
+        for _, prod in df_prod.iterrows():
+            nombre = prod["nombre"]
 
-            df_mov_grouped = df_mov.groupby("producto") if not df_mov.empty else None
+            stock, valor, cpp = calcular_estado_producto(df_mov, nombre)
+            stock_min = pd.to_numeric(prod.get("stock_min"), errors="coerce")
+            stock_min = int(stock_min) if pd.notna(stock_min) else 0
 
-            for _, prod in df_prod.iterrows():
+            if stock <= 0:
+                estado = "🔴 Sin stock"
+            elif stock <= stock_min:
+                estado = "🟠 Bajo mínimo"
+            else:
+                estado = "🟢 OK"
 
-                nombre = prod["nombre"]
-
-                df_p = df_mov_grouped.get_group(nombre) if df_mov_grouped is not None and nombre in df_mov_grouped.groups else pd.DataFrame()
-
-                ingresos = df_p[df_p["acción"] == "Ingreso"]
-                salidas = df_p[df_p["acción"] == "Salida"]
-
-                stock = ingresos["cantidad"].sum() - salidas["cantidad"].sum()
-
-                total_ing = ingresos["cantidad"].sum()
-
-                if total_ing > 0:
-                    costo = (ingresos["cantidad"] * ingresos["precio"]).sum() / total_ing
-                else:
-                    costo = 0
-
-                stock_min = int(prod.get("stock_min", 0))
-
-                if stock <= 0:
-                    estado = "🔴 Sin stock"
-                elif stock <= stock_min:
-                    estado = "🟠 Bajo mínimo"
-                else:
-                    estado = "🟢 OK"
-
-                resultados.append({
-                    "producto": nombre,
-                    "stock": stock,
-                    "costo_promedio": round(costo, 2),
-                    "total": round(stock * costo, 2),
-                    "estado": estado
-                })
+            resultados.append({
+                "producto": nombre,
+                "stock": stock,
+                "estado": estado
+            })
 
         df_inv = pd.DataFrame(resultados)
-
-        st.dataframe(df_inv, use_container_width=True)
-        st.download_button("Descargar", to_csv(df_inv), "inventario.csv")
-
+        st.dataframe(df_inv, width="stretch")
 
 # ================================
-# 🔄 MOVIMIENTOS
+# MOVIMIENTOS
 # ================================
-
 elif menu == "🔄 Movimientos":
 
     if df_prod.empty:
         st.warning("Primero crea productos en ⚙️ Configuración")
 
     else:
-        st.subheader("Entrada")
+        st.subheader("Entrada / Salida")
+
+        # 🔥 ORDEN CORRECTO
+        tipo = st.radio("Tipo", ["Ingreso", "Salida", "Ajuste"])
 
         producto = st.selectbox("Producto", df_prod["nombre"])
+
         cantidad = st.number_input("Cantidad", min_value=1)
-        costo = st.number_input("Costo total", min_value=0.0)
+
+        monto_total = 0
+        if tipo == "Ingreso":
+            monto_total = st.number_input(
+                "Monto Total",
+                min_value=0.0,
+                value=None,
+                placeholder="Ingrese monto total"
+            )
+
         nota = st.text_input("Nota")
 
-        if st.button("Guardar entrada"):
-            ws = sheet.worksheet("movimientos")
+        # 🔘 BOTÓN
+        if st.button("Guardar movimiento"):
 
-            ws.append_row([
-                datetime.now().strftime("%Y-%m-%d %H:%M"),
-                producto,
-                "Ingreso",
-                float(cantidad),
-                float(costo),
-                nota
-            ])
+            # 🔥 VALIDACIÓN (solo aquí)
+            if tipo == "Ingreso" and (monto_total is None or monto_total <= 0):
+                st.error("Debe ingresar un monto total válido")
+                st.stop()
 
-            st.cache_data.clear()
-            st.rerun()
+            if tipo == "Ajuste":
+                stock_actual, _, _ = calcular_estado_producto(df_mov, producto)
 
-        st.subheader("Salida")
+                diferencia = stock_actual - cantidad
 
-        producto_s = st.selectbox("Producto salida", df_prod["nombre"])
-
-        stock = calcular_stock(df_mov, producto_s)
-        st.info(f"Stock actual: {stock}")
-
-        modo = st.radio("Tipo", ["Cantidad", "Stock final"])
-
-        if modo == "Cantidad":
-            cantidad_s = st.number_input("Cantidad salida", min_value=1)
-        else:
-            nuevo = st.number_input("Stock final", min_value=0)
-            cantidad_s = stock - nuevo
-            st.write(f"Salida: {cantidad_s}")
-
-        if st.button("Registrar salida"):
-
-            if cantidad_s <= 0 or cantidad_s > stock:
-                st.error("Cantidad inválida")
-            else:
-                ws = sheet.worksheet("movimientos")
-
-                df_temp = df_mov[df_mov["producto"] == producto_s]
-                ing = df_temp[df_temp["acción"] == "Ingreso"]
-
-                if not ing.empty and ing["cantidad"].sum() > 0:
-                    costo_prom = ing["monto total"].sum() / ing["cantidad"].sum()
+                if diferencia > 0:
+                    tipo_real = "Salida"
+                    cantidad_real = diferencia
                 else:
-                    costo_prom = 0
+                    tipo_real = "Ingreso"
+                    cantidad_real = abs(diferencia)
 
-                cantidad_s = int(cantidad_s)
+                ok, msg = crear_movimiento(
+                    sheet,
+                    producto,
+                    cantidad_real,
+                    tipo_real,
+                    f"Ajuste a {cantidad}. {nota}",
+                    0
+                )
 
-                ws.append_row([
-                    datetime.now().strftime("%Y-%m-%d %H:%M"),
-                    producto_s,
+            elif tipo == "Ingreso":
+
+                ok, msg = crear_movimiento(
+                    sheet,
+                    producto,
+                    cantidad,
+                    "Ingreso",
+                    nota,
+                    monto_total
+                )
+
+            else:  # Salida
+
+                stock_actual, valor_actual, cpp = calcular_estado_producto(df_mov, producto)
+
+                if stock_actual <= 0:
+                    st.error("No hay stock disponible")
+                    st.stop()
+
+                if cantidad > stock_actual:
+                    st.error("Stock insuficiente")
+                    st.stop()
+
+                monto_salida = cantidad * cpp
+
+                ok, msg = crear_movimiento(
+                    sheet,
+                    producto,
+                    cantidad,
                     "Salida",
-                    float(cantidad_s),
-                    float(costo_prom),
-                    ""
-                ])
+                    nota,
+                    monto_salida
+                )
 
+            if ok:
+                st.success(msg)
                 st.cache_data.clear()
                 st.rerun()
-
+            else:
+                st.error(msg)
 
 # ================================
-# ⚙️ CONFIG
+# CONFIGURACIÓN
 # ================================
-
 elif menu == "⚙️ Configuración":
 
-    ws_prod = sheet.worksheet("productos")
-    ws_cat = sheet.worksheet("categorias")
-    ws_uni = sheet.worksheet("unidades")
+    st.write("CATEGORIAS DF:")
+    st.write(df_cat)
+
+    st.write("COLUMNAS:")
+    st.write(df_cat.columns)
 
     st.subheader("📦 Crear producto")
 
-    categorias = df_cat["nombre"].dropna().tolist() if ("nombre" in df_cat.columns and not df_cat.empty) else []
-    unidades = df_uni["nombre"].dropna().tolist() if ("nombre" in df_uni.columns and not df_uni.empty) else []
+    categorias = df_cat["categoria"].tolist() if "categoria" in df_cat.columns else []
+    unidades = df_uni["unidad"].tolist() if "unidad" in df_uni.columns else []
 
     nombre = st.text_input("Nombre producto")
     categoria = st.selectbox("Categoría", categorias if categorias else [""])
     unidad = st.selectbox("Unidad", unidades if unidades else [""])
     stock_min = st.number_input("Stock mínimo", min_value=0)
 
-    if st.button("Guardar producto", key="btn_producto"):
-        ws_prod.append_row([nombre, categoria, unidad, stock_min])
-        st.success("Producto guardado ✅")
-        st.rerun()
+    if st.button("Guardar producto"):
+
+        ok, msg = crear_producto(
+            sheet,
+            nombre,
+            categoria,
+            unidad,
+            stock_min
+        )
+
+        if ok:
+            st.success(msg)
+            st.cache_data.clear()
+            st.rerun()
+        else:
+            st.error(msg)
 
     st.divider()
 
+    # ====================
+    # CATEGORÍAS
+    # ====================
     st.subheader("🏷️ Categorías")
 
     nueva_cat = st.text_input("Nueva categoría")
-    emoji = st.text_input("Emoji categoría (ej: 🥦, 🍺, 📦)")
+    emoji = st.text_input("Emoji")
 
-    if st.button("Agregar categoría", key="btn_cat"):
-        ws_cat.append_row([nueva_cat, emoji])
-        st.success("Categoría creada")
-        st.rerun()
+    if st.button("Agregar categoría"):
+
+        ok, msg = crear_categoria(sheet, nueva_cat, emoji)
+
+        if ok:
+            st.success(msg)
+            st.cache_data.clear()
+            st.rerun()
+        else:
+            st.error(msg)
 
     st.divider()
 
+    # ====================
+    # UNIDADES
+    # ====================
     st.subheader("📏 Unidades")
 
     nueva_uni = st.text_input("Nueva unidad")
 
-    if st.button("Agregar unidad", key="btn_uni"):
-        ws_uni.append_row([nueva_uni])
-        st.success("Unidad creada")
-        st.rerun()
+    if st.button("Agregar unidad"):
 
+        ok, msg = crear_unidad(sheet, nueva_uni)
+
+        if ok:
+            st.success(msg)
+            st.cache_data.clear()
+            st.rerun()
+        else:
+            st.error(msg)
 
 # ================================
-# 📜 HISTORIAL
+# HISTORIAL
 # ================================
-
 elif menu == "📜 Historial":
 
     if not df_mov.empty:
-        df_mov["costo unitario"] = df_mov.apply(
-            lambda x: x["monto total"] / x["cantidad"] if x["cantidad"] not in [0, None] else 0,
-            axis=1
-        )
-
-        st.dataframe(df_mov)
-        st.download_button("Descargar", to_csv(df_mov), "historial.csv")
+        st.dataframe(df_mov, width="stretch")
