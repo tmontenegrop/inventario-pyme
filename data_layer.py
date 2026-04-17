@@ -17,7 +17,7 @@ def _get_ws(sheet, name):
 
 def _safe_get_df(sheet, nombre_hoja):
     try:
-        ws = _get_ws(sheet, nombre_hoja)  # 🔥 AQUÍ el cambio correcto
+        ws = _get_ws(sheet, nombre_hoja)
         values = ws.get_all_values()
 
         if len(values) <= 1:
@@ -25,16 +25,6 @@ def _safe_get_df(sheet, nombre_hoja):
 
         df = pd.DataFrame(values[1:], columns=values[0])
 
-        df.columns = df.columns.str.lower().str.replace(" ", "_")
-
-        return df
-
-    except Exception:
-        return pd.DataFrame()
-
-        df = pd.DataFrame(values[1:], columns=values[0])
-
-        # normalización mínima (solo formato, no lógica)
         df.columns = (
             df.columns
             .str.strip()
@@ -187,14 +177,19 @@ def crear_movimiento(sheet, producto, cantidad, tipo, nota, monto_total=0):
 
 def calcular_estado_producto(df_mov, producto):
     if df_mov.empty:
-        return 0, 0, 0  # stock, valor, cpp
+        return 0, 0, 0
+
+    df_mov = df_mov.copy()
+
+    # 🔥 NORMALIZACIÓN CLAVE
+    df_mov["producto"] = df_mov["producto"].astype(str).str.strip().str.lower()
+    producto = str(producto).strip().lower()
 
     df_p = df_mov[df_mov["producto"] == producto]
 
     ingresos = df_p[df_p["accion"] == "Ingreso"]
     salidas = df_p[df_p["accion"] == "Salida"]
 
-    # Totales
     cantidad_ing = pd.to_numeric(ingresos["cantidad"], errors="coerce").fillna(0).sum()
     monto_ing = pd.to_numeric(ingresos["monto_total"], errors="coerce").fillna(0).sum()
 

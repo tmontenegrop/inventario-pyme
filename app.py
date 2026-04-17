@@ -143,11 +143,14 @@ if menu == "📊 Inventario":
 
             resultados.append({
                 "producto": nombre,
-                "stock": stock,
+                "stock": round(stock, 2),
+                "cpp": round(cpp, 2),
+                "valor_inventario": round(stock * cpp, 2),
                 "estado": estado
             })
 
         df_inv = pd.DataFrame(resultados)
+        df_inv = df_inv.sort_values("producto")
         st.dataframe(df_inv, width="stretch")
 
 # ================================
@@ -188,16 +191,22 @@ elif menu == "🔄 Movimientos":
                 st.stop()
 
             if tipo == "Ajuste":
-                stock_actual, _, _ = calcular_estado_producto(df_mov, producto)
+
+                stock_actual, valor_actual, cpp = calcular_estado_producto(df_mov, producto)
 
                 diferencia = stock_actual - cantidad
 
                 if diferencia > 0:
+                    # 🔻 BAJA STOCK → SALIDA
                     tipo_real = "Salida"
                     cantidad_real = diferencia
+                    monto_total = cantidad_real * cpp
+
                 else:
+                    # 🔺 SUBE STOCK → INGRESO
                     tipo_real = "Ingreso"
                     cantidad_real = abs(diferencia)
+                    monto_total = cantidad_real * cpp  # 🔥 usamos CPP actual
 
                 ok, msg = crear_movimiento(
                     sheet,
@@ -205,7 +214,7 @@ elif menu == "🔄 Movimientos":
                     cantidad_real,
                     tipo_real,
                     f"Ajuste a {cantidad}. {nota}",
-                    0
+                    monto_total
                 )
 
             elif tipo == "Ingreso":
@@ -334,4 +343,73 @@ elif menu == "⚙️ Configuración":
 elif menu == "📜 Historial":
 
     if not df_mov.empty:
-        st.dataframe(df_mov, width="stretch")
+        columnas_correctas = [
+            "fecha",
+            "id_producto",
+            "producto",
+            "accion",
+            "cantidad",
+            "monto_total",
+            "nota"
+        ]
+
+        df_view = df_mov.copy()
+
+        # 🔥 ordenar por fecha
+        df_view = df_view.sort_values("fecha")
+
+        # 🔥 limpiar datos
+        df_view["producto"] = df_view["producto"].astype(str).str.strip().str.lower()
+        df_view["cantidad"] = pd.to_numeric(df_view["cantidad"], errors="coerce").fillna(0)
+        df_view["monto_total"] = pd.to_numeric(df_view["monto_total"], errors="coerce").fillna(0)
+
+        # 🔥 estructuras por producto
+        stock_dict = {}
+        valor_dict = {}
+        cpp_list = []
+
+        for _, row in df_view.iterrows():
+
+            prod = row["producto"]
+
+            # inicializar si no existe
+            if prod not in stock_dict:
+                stock_dict[prod] = 0
+                valor_dict[prod] = 0
+
+            stock = stock_dict[prod]
+            valor = valor_dict[prod]
+
+            if row["accion"] == "Ingreso":
+                stock += row["cantidad"]
+                valor += row["monto_total"]
+
+            elif row["accion"] == "Salida":
+                cpp_actual = valor / stock if stock > 0 else 0
+                stock -= row["cantidad"]
+                valor -= row["cantidad"] * cpp_actual
+
+            # guardar estado actualizado
+            stock_dict[prod] = stock
+            valor_dict[prod] = valor
+
+            cpp_actual = valor / stock if stock > 0 else 0
+            cpp_list.append(cpp_actual)
+
+        df_view["cpp"] = cpp_list
+
+        # 🔥 orden columnas
+        columnas = [
+            "fecha",
+            "id_producto",
+            "producto",
+            "accion",
+            "cantidad",
+            "monto_total",
+            "cpp",
+            "nota"
+        ]
+
+        df_view = df_view[[c for c in columnas if c in df_view.columns]]
+
+        st.dataframe(df_view, width="stretch")
