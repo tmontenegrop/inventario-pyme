@@ -468,6 +468,25 @@ elif menu == "⚙️ Configuración":
 elif menu == "📜 Historial":
 
     if not df_mov.empty:
+
+        st.subheader("📜 Historial de movimientos")
+
+        # 🔥 OPCIONAL PRO
+        mostrar_eliminados = st.checkbox(
+            "Mostrar movimientos eliminados",
+            key="chk_show_deleted"
+        )
+
+        if "estado" in df_mov.columns:
+            if mostrar_eliminados:
+                df_view = df_mov
+            else:
+                df_view = df_mov[df_mov["estado"] != "ELIMINADO"]
+        else:
+            df_view = df_mov
+
+        st.dataframe(df_view, width="stretch")
+
         columnas_correctas = [
             "fecha",
             "id_producto",
@@ -546,3 +565,83 @@ elif menu == "📜 Historial":
                 )
 
         st.dataframe(df_view_format, width="stretch")
+
+        st.subheader("🗑️ Anular movimiento")
+
+        if not df_mov.empty:
+
+            idx = st.number_input(
+                "Índice del movimiento a eliminar",
+                min_value=0,
+                max_value=len(df_mov) - 1,
+                step=1
+            )
+
+            confirmar = st.checkbox("Confirmar eliminación", key="chk_del_mov")
+
+            if st.button("Eliminar movimiento", key="btn_del_mov"):
+
+                if not confirmar:
+                    st.warning("Debes confirmar")
+                    st.stop()
+
+                ws = sheet.worksheet("movimientos")
+
+                values = ws.get_all_values()
+                headers = values[0]
+                rows = values[1:]
+
+                if "Estado" not in headers:
+                    st.error("Falta columna Estado en la hoja")
+                    st.stop()
+
+                estado_idx = headers.index("Estado")
+
+                rows[idx][estado_idx] = "ELIMINADO"
+
+                ws.clear()
+                ws.append_row(headers)
+                for r in rows:
+                    ws.append_row(r)
+
+                st.success("Movimiento anulado")
+                st.cache_data.clear()
+                st.rerun()
+
+                st.divider()
+                st.subheader("🗑️ Eliminar movimiento")
+
+                # Crear identificador único
+                df_mov["id_mov"] = df_mov.index.astype(str)
+
+                mov_seleccionado = st.selectbox(
+                    "Seleccionar movimiento",
+                    df_mov["id_mov"],
+                    format_func=lambda
+                        x: f"{df_mov.loc[int(x), 'fecha']} | {df_mov.loc[int(x), 'producto']} | {df_mov.loc[int(x), 'accion']} | {df_mov.loc[int(x), 'cantidad']}"
+                )
+
+                confirmar = st.checkbox("Confirmar eliminación")
+
+                if st.button("Eliminar movimiento"):
+
+                    if not confirmar:
+                        st.warning("Debes confirmar la eliminación")
+                        st.stop()
+
+                    fila = int(mov_seleccionado)
+
+                    ws = sheet.worksheet("movimientos")
+
+                    # +2 porque:
+                    # fila 1 = headers
+                    # index 0 = fila 2
+                    row_number = fila + 2
+
+                    col_estado = 8  # columna Estado
+
+                    ws.update_cell(row_number, col_estado, "ELIMINADO")
+
+                    st.success("Movimiento eliminado")
+                    st.cache_data.clear()
+                    st.rerun()

@@ -88,19 +88,19 @@ def crear_producto(sheet, nombre, categoria, unidad, stock_minimo):
 
     df = _safe_get_df(sheet, "productos")
 
-    # 🔥 normalizar
     nombre_clean = str(nombre).strip().lower()
 
-    df["nombre"] = df["nombre"].astype(str).str.strip().str.lower()
+    # 🔥 VALIDAR SOLO SI EXISTE LA COLUMNA
+    if not df.empty and "nombre" in df.columns:
+        df["nombre"] = df["nombre"].astype(str).str.strip().str.lower()
 
-    if nombre_clean in df["nombre"].values:
-        return False, "El producto ya existe"
+        if nombre_clean in df["nombre"].values:
+            return False, "El producto ya existe"
 
     ws = _get_ws(sheet, "productos")
 
-    # ID simple incremental
-    df = _safe_get_df(sheet, "productos")
-    nuevo_id = len(df) + 1
+    # ID simple incremental seguro
+    nuevo_id = len(df) + 1 if not df.empty else 1
 
     ws.append_row([
         nuevo_id,
@@ -190,26 +190,49 @@ def calcular_estado_producto(df_mov, producto):
     if df_mov.empty:
         return 0, 0, 0
 
-    df_mov = df_mov.copy()
+    df = df_mov.copy()
 
-    # 🔥 NORMALIZACIÓN CLAVE
-    df_mov["producto"] = df_mov["producto"].astype(str).str.strip().str.lower()
+    # 🔥 ignorar eliminados
+    if "estado" in df.columns:
+        df = df[df["estado"] != "ELIMINADO"]
+
+    # 🔥 normalizar
+    df["producto"] = df["producto"].astype(str).str.strip().str.lower()
     producto = str(producto).strip().lower()
 
-    df_p = df_mov[df_mov["producto"] == producto]
+    df = df[df["producto"] == producto]
 
-    ingresos = df_p[df_p["accion"] == "Ingreso"]
-    salidas = df_p[df_p["accion"] == "Salida"]
+    if df.empty:
+        return 0, 0, 0
 
-    cantidad_ing = pd.to_numeric(ingresos["cantidad"], errors="coerce").fillna(0).sum()
-    monto_ing = pd.to_numeric(ingresos["monto_total"], errors="coerce").fillna(0).sum()
+    # 🔥 ordenar por fecha
+    df = df.sort_values("fecha")
 
-    cantidad_sal = pd.to_numeric(salidas["cantidad"], errors="coerce").fillna(0).sum()
-    monto_sal = pd.to_numeric(salidas["monto_total"], errors="coerce").fillna(0).sum()
+    stock = 0
+    valor = 0
+    cpp = 0
 
-    stock = cantidad_ing - cantidad_sal
-    valor = monto_ing - monto_sal
+    for _, row in df.iterrows():
 
-    cpp = valor / stock if stock > 0 else 0
+        cantidad = float(pd.to_numeric(row["cantidad"], errors="coerce") or 0)
+        monto = float(pd.to_numeric(row["monto_total"], errors="coerce") or 0)
+        accion = str(row["accion"]).strip().lower()
+
+        if accion == "ingreso":
+            stock += cantidad
+            valor += monto
+
+            cpp = valor / stock if stock > 0 else 0
+
+        elif accion == "salida":
+            if stock <= 0:
+                continue
+
+            costo = cantidad * cpp
+
+            stock -= cantidad
+            valor -= costo
+
+            cpp = valor / stock if stock > 0 else 0
 
     return stock, valor, cpp
