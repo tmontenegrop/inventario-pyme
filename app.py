@@ -32,8 +32,16 @@ def get_sheet(sheet_id):
 # ================================
 # LOGIN
 # ================================
+# 🔥 intentar recuperar sesión desde URL
 if "login" not in st.session_state:
     st.session_state["login"] = False
+
+    # 🔥 recuperar sesión desde URL
+    params = st.query_params
+
+    if "sheet_id" in params and not st.session_state["login"]:
+        st.session_state["login"] = True
+        st.session_state["sheet_id"] = params["sheet_id"]
 
 
 def mostrar_login():
@@ -68,6 +76,11 @@ def mostrar_login():
             if not user.empty:
                 st.session_state["login"] = True
                 st.session_state["sheet_id"] = user.iloc[0]["sheet_id"]
+
+                # 🔥 NUEVO (guardar en URL)
+                st.query_params["sheet_id"] = user.iloc[0]["sheet_id"]
+
+                st.success("Login exitoso")  # 👈 opcional pero recomendado
                 st.rerun()
             else:
                 st.error("Credenciales incorrectas")
@@ -83,6 +96,11 @@ def mostrar_login():
 
                 st.session_state["login"] = True
                 st.session_state["sheet_id"] = sheet_id
+
+                # 🔥 NUEVO
+                st.query_params["sheet_id"] = sheet_id
+
+                st.success("Cuenta creada correctamente")  # opcional
                 st.rerun()
 
 
@@ -119,6 +137,7 @@ menu = st.radio(
 # ================================
 # INVENTARIO
 # ================================
+
 if menu == "📊 Inventario":
 
     if df_prod.empty:
@@ -131,7 +150,7 @@ if menu == "📊 Inventario":
             nombre = prod["nombre"]
 
             stock, valor, cpp = calcular_estado_producto(df_mov, nombre)
-            stock_min = pd.to_numeric(prod.get("stock_min"), errors="coerce")
+            stock_min = pd.to_numeric(prod.get("stock_minimo"), errors="coerce")
             stock_min = int(stock_min) if pd.notna(stock_min) else 0
 
             if stock <= 0:
@@ -151,7 +170,15 @@ if menu == "📊 Inventario":
 
         df_inv = pd.DataFrame(resultados)
         df_inv = df_inv.sort_values("producto")
-        st.dataframe(df_inv, width="stretch")
+        df_view = df_inv.copy()
+
+        for col in ["cpp", "valor_inventario"]:
+            if col in df_view.columns:
+                df_view[col] = df_view[col].apply(
+                    lambda x: f"${x:,.0f}".replace(",", ".") if pd.notna(x) else ""
+                )
+
+        st.dataframe(df_view, width="stretch")
 
 # ================================
 # MOVIMIENTOS
@@ -263,12 +290,6 @@ elif menu == "🔄 Movimientos":
 # ================================
 elif menu == "⚙️ Configuración":
 
-    st.write("CATEGORIAS DF:")
-    st.write(df_cat)
-
-    st.write("COLUMNAS:")
-    st.write(df_cat.columns)
-
     st.subheader("📦 Crear producto")
 
     categorias = df_cat["categoria"].tolist() if "categoria" in df_cat.columns else []
@@ -298,13 +319,52 @@ elif menu == "⚙️ Configuración":
 
     st.divider()
 
+    st.divider()
+    st.subheader("🗑️ Eliminar producto")
+
+    if not df_prod.empty:
+
+        st.dataframe(df_prod, width="stretch")
+
+        producto_eliminar = st.selectbox(
+            "Seleccionar producto",
+            df_prod["nombre"],
+            key="del_producto"
+        )
+
+        confirmar = st.checkbox("Confirmar eliminación", key="chk_del_prod")
+
+        if st.button("Eliminar producto", key="btn_del_producto"):
+
+            if not confirmar:
+                st.warning("Debes confirmar la eliminación")
+                st.stop()
+
+            ws = sheet.worksheet("productos")
+
+            df = df_prod[df_prod["nombre"] != producto_eliminar]
+
+            ws.clear()
+            ws.append_row(["ID", "Nombre", "Categoria", "Unidad", "Stock Minimo"])
+
+            for _, row in df.iterrows():
+                ws.append_row(row.tolist())
+
+            st.success("Producto eliminado correctamente")
+            st.cache_data.clear()
+            st.rerun()
+
     # ====================
     # CATEGORÍAS
     # ====================
     st.subheader("🏷️ Categorías")
 
     nueva_cat = st.text_input("Nueva categoría")
-    emoji = st.text_input("Emoji")
+    emoji = st.selectbox(
+        "Emoji",
+        ["📦", "🍎", "🥤", "🧂", "🍞", "🥩", "🧀", "🍺", "📊", "🔧"],
+        key="emoji_select"
+    )
 
     if st.button("Agregar categoría"):
 
@@ -318,6 +378,36 @@ elif menu == "⚙️ Configuración":
             st.error(msg)
 
     st.divider()
+
+    st.subheader("🗑️ Eliminar categoría")
+
+    if not df_cat.empty:
+
+        st.dataframe(df_cat, width="stretch")
+
+        categoria_eliminar = st.selectbox(
+            "Seleccionar categoria",
+            df_cat["categoria"],
+            key="del_cat"
+        )
+
+        confirmar = st.checkbox("Confirmar eliminación", key="chk_del_categoria")
+
+        if st.button("Eliminar categoría", key="btn_del_categoria"):
+
+            ws = sheet.worksheet("categorias")
+
+            df = df_cat[df_cat["categoria"] != categoria_eliminar]
+
+            ws.clear()
+            ws.append_row(["Categoria", "Emoji"])
+
+            for _, row in df.iterrows():
+                ws.append_row(row.tolist())
+
+            st.success("Categoría eliminada")
+            st.cache_data.clear()
+            st.rerun()
 
     # ====================
     # UNIDADES
@@ -336,6 +426,41 @@ elif menu == "⚙️ Configuración":
             st.rerun()
         else:
             st.error(msg)
+
+    st.subheader("🗑️ Eliminar unidad")
+
+    if not df_uni.empty:
+
+        st.dataframe(df_uni, width="stretch")
+
+        unidad_eliminar = st.selectbox(
+            "Unidad",
+            df_uni["unidad"],
+            key="del_unidad"
+        )
+
+        confirmar = st.checkbox("Confirmar eliminación", key="chk_del_uni")
+
+        if st.button("Eliminar unidad", key="btn_del_unidad"):
+
+            if not confirmar:
+
+                st.warning("Debes confirmar la eliminación")
+                st.stop()
+
+            ws = sheet.worksheet("unidades")
+
+            df = df_uni[df_uni["unidad"] != unidad_eliminar]
+
+            ws.clear()
+            ws.append_row(["Unidad"])
+
+            for _, row in df.iterrows():
+                ws.append_row(row.tolist())
+
+            st.success("Unidad de Medida eliminada correctamente")
+            st.cache_data.clear()
+            st.rerun()
 
 # ================================
 # HISTORIAL
@@ -412,4 +537,12 @@ elif menu == "📜 Historial":
 
         df_view = df_view[[c for c in columnas if c in df_view.columns]]
 
-        st.dataframe(df_view, width="stretch")
+        df_view_format = df_view.copy()
+
+        for col in ["monto_total", "cpp"]:
+            if col in df_view_format.columns:
+                df_view_format[col] = df_view_format[col].apply(
+                    lambda x: f"${x:,.0f}".replace(",", ".") if pd.notna(x) else ""
+                )
+
+        st.dataframe(df_view_format, width="stretch")

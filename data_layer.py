@@ -86,6 +86,16 @@ def crear_producto(sheet, nombre, categoria, unidad, stock_minimo):
     if not nombre:
         return False, "Nombre requerido"
 
+    df = _safe_get_df(sheet, "productos")
+
+    # 🔥 normalizar
+    nombre_clean = str(nombre).strip().lower()
+
+    df["nombre"] = df["nombre"].astype(str).str.strip().str.lower()
+
+    if nombre_clean in df["nombre"].values:
+        return False, "El producto ya existe"
+
     ws = _get_ws(sheet, "productos")
 
     # ID simple incremental
@@ -165,7 +175,8 @@ def crear_movimiento(sheet, producto, cantidad, tipo, nota, monto_total=0):
         float(cantidad),                            # Cantidad
         tipo,                                       # Accion
         nota,                                       # Nota
-        float(monto_total)                          # Monto Total
+        float(monto_total),                          # Monto Total
+        "OK"                                        # Estado
     ])
 
     return True, "Movimiento registrado"
