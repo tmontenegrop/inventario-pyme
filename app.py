@@ -15,7 +15,9 @@ from data_layer import (
     crear_movimiento,
     calcular_estado_producto
 )
-
+if st.button("🔄 Reautenticar"):
+    st.cache_resource.clear()
+    st.rerun()
 # ================================
 # CONFIG
 # ================================
@@ -26,8 +28,12 @@ st.set_page_config(layout="wide")
 # ================================
 @st.cache_resource
 def get_sheet(sheet_id):
-    credentials = get_credentials()
-    return conectar_sheet(credentials, sheet_id)
+    try:
+        credentials = get_credentials()
+        return conectar_sheet(credentials, sheet_id)
+    except Exception as e:
+        st.error(f"Error de conexión: {e}")
+        st.stop()
 
 # ================================
 # LOGIN
@@ -128,6 +134,16 @@ df_mov = data["movimientos"]
 df_cat = data["categorias"]
 df_uni = data["unidades"]
 
+# 🔥 FILTRAR ELIMINADOS (SOFT DELETE)
+if "estado" in df_prod.columns:
+    df_prod = df_prod[df_prod["estado"] != "ELIMINADO"]
+
+if "estado" in df_cat.columns:
+    df_cat = df_cat[df_cat["estado"] != "ELIMINADO"]
+
+if "estado" in df_uni.columns:
+    df_uni = df_uni[df_uni["estado"] != "ELIMINADO"]
+
 menu = st.radio(
     "Menú",
     ["📊 Inventario", "🔄 Movimientos", "⚙️ Configuración", "📜 Historial"],
@@ -156,7 +172,7 @@ if menu == "📊 Inventario":
             if stock <= 0:
                 estado = "🔴 Sin stock"
             elif stock <= stock_min:
-                estado = "🟠 Bajo mínimo"
+                estado = "⚠️ Stock Crítico"
             else:
                 estado = "🟢 OK"
 
@@ -319,40 +335,88 @@ elif menu == "⚙️ Configuración":
 
     st.divider()
 
-    st.divider()
+    # st.subheader("🗑️ Eliminar producto")
+    #
+    # df_sel = data["productos"].copy()
+    #
+    # if "estado" in df_sel.columns:
+    #     df_sel = df_sel[df_sel["estado"] != "ELIMINADO"]
+    #
+    # if not df_sel.empty:
+    #
+    #     df_sel["row_number"] = df_sel.index + 2
+    #     df_sel["id"] = df_sel.index.astype(str)
+    #
+    #     tipo = "producto"
+    #
+    #     prod = st.selectbox(
+    #         "Producto",
+    #         df_sel["id"],
+    #         format_func=lambda x: df_sel.loc[int(x), "nombre"],
+    #         key=f"select_{tipo}_eliminar"
+    #     )
+    #
+    #     if st.button("Eliminar producto"):
+    #         fila = int(df_sel.loc[int(prod), "row_number"])
+    #         ws = sheet.worksheet("productos")
+    #         ws.update_cell(fila, 6, "ELIMINADO")  # 👈 col Estado
+    #
+    #         st.success("Producto eliminado")
+    #         st.cache_data.clear()
+    #         st.rerun()
+
+    # ====================
+    # 🗑️ ELIMINAR PRODUCTO
+    # ====================
+
     st.subheader("🗑️ Eliminar producto")
 
-    if not df_prod.empty:
+    df_sel = data["productos"].copy()
 
-        st.dataframe(df_prod, width="stretch")
+    if "estado" in df_sel.columns:
+        df_sel = df_sel[df_sel["estado"] != "ELIMINADO"]
 
-        producto_eliminar = st.selectbox(
-            "Seleccionar producto",
-            df_prod["nombre"],
-            key="del_producto"
+    if not df_sel.empty:
+
+        df_sel["row_number"] = df_sel.index + 2
+        df_sel["id"] = df_sel.index.astype(str)
+
+        if "confirmar_eliminar_producto" not in st.session_state:
+            st.session_state["confirmar_eliminar_producto"] = False
+
+        prod = st.selectbox(
+            "Producto",
+            df_sel["id"],
+            format_func=lambda x: df_sel.loc[int(x), "nombre"],
+            key="select_producto_eliminar"
         )
 
-        confirmar = st.checkbox("Confirmar eliminación", key="chk_del_prod")
+        if st.button("🗑️ Eliminar producto", type="primary"):
+            st.session_state["confirmar_eliminar_producto"] = True
 
-        if st.button("Eliminar producto", key="btn_del_producto"):
+        if st.session_state["confirmar_eliminar_producto"]:
 
-            if not confirmar:
-                st.warning("Debes confirmar la eliminación")
-                st.stop()
+            st.error("⚠️ Esta acción no se puede deshacer")
+            st.warning("¿Seguro que quieres eliminar este producto?")
 
-            ws = sheet.worksheet("productos")
+            col1, col2 = st.columns(2)
 
-            df = df_prod[df_prod["nombre"] != producto_eliminar]
+            with col1:
+                if st.button("✅ Sí, eliminar"):
+                    fila = int(df_sel.loc[int(prod), "row_number"])
+                    ws = sheet.worksheet("productos")
+                    ws.update_cell(fila, 6, "ELIMINADO")
 
-            ws.clear()
-            ws.append_row(["ID", "Nombre", "Categoria", "Unidad", "Stock Minimo"])
+                    st.success("Producto eliminado")
+                    st.session_state["confirmar_eliminar_producto"] = False
+                    st.cache_data.clear()
+                    st.rerun()
 
-            for _, row in df.iterrows():
-                ws.append_row(row.tolist())
+            with col2:
+                if st.button("❌ Cancelar"):
+                    st.session_state["confirmar_eliminar_producto"] = False
 
-            st.success("Producto eliminado correctamente")
-            st.cache_data.clear()
-            st.rerun()
+
 
     # ====================
     # CATEGORÍAS
@@ -381,29 +445,29 @@ elif menu == "⚙️ Configuración":
 
     st.subheader("🗑️ Eliminar categoría")
 
-    if not df_cat.empty:
+    df_sel = data["categorias"].copy()
 
-        st.dataframe(df_cat, width="stretch")
+    if "estado" in df_sel.columns:
+        df_sel = df_sel[df_sel["estado"] != "ELIMINADO"]
 
-        categoria_eliminar = st.selectbox(
-            "Seleccionar categoria",
-            df_cat["categoria"],
-            key="del_cat"
+    if not df_sel.empty:
+
+        df_sel["row_number"] = df_sel.index + 2
+        df_sel["id"] = df_sel.index.astype(str)
+
+        tipo = "catergoria"
+
+        cat = st.selectbox(
+            "Categoría",
+            df_sel["id"],
+            format_func=lambda x: df_sel.loc[int(x), "categoria"],
+        key=f"select_{tipo}_eliminar"
         )
 
-        confirmar = st.checkbox("Confirmar eliminación", key="chk_del_categoria")
-
-        if st.button("Eliminar categoría", key="btn_del_categoria"):
-
+        if st.button("Eliminar categoría"):
+            fila = int(df_sel.loc[int(cat), "row_number"])
             ws = sheet.worksheet("categorias")
-
-            df = df_cat[df_cat["categoria"] != categoria_eliminar]
-
-            ws.clear()
-            ws.append_row(["Categoria", "Emoji"])
-
-            for _, row in df.iterrows():
-                ws.append_row(row.tolist())
+            ws.update_cell(fila, 3, "ELIMINADO")
 
             st.success("Categoría eliminada")
             st.cache_data.clear()
@@ -429,36 +493,31 @@ elif menu == "⚙️ Configuración":
 
     st.subheader("🗑️ Eliminar unidad")
 
-    if not df_uni.empty:
+    df_sel = data["unidades"].copy()
 
-        st.dataframe(df_uni, width="stretch")
+    if "estado" in df_sel.columns:
+        df_sel = df_sel[df_sel["estado"] != "ELIMINADO"]
 
-        unidad_eliminar = st.selectbox(
+    if not df_sel.empty:
+
+        df_sel["row_number"] = df_sel.index + 2
+        df_sel["id"] = df_sel.index.astype(str)
+
+        tipo = "unidad"
+
+        uni = st.selectbox(
             "Unidad",
-            df_uni["unidad"],
-            key="del_unidad"
+            df_sel["id"],
+            format_func=lambda x: df_sel.loc[int(x), "unidad"],
+            key=f"select_{tipo}_eliminar"
         )
 
-        confirmar = st.checkbox("Confirmar eliminación", key="chk_del_uni")
-
-        if st.button("Eliminar unidad", key="btn_del_unidad"):
-
-            if not confirmar:
-
-                st.warning("Debes confirmar la eliminación")
-                st.stop()
-
+        if st.button("Eliminar unidad"):
+            fila = int(df_sel.loc[int(uni), "row_number"])
             ws = sheet.worksheet("unidades")
+            ws.update_cell(fila, 2, "ELIMINADO")
 
-            df = df_uni[df_uni["unidad"] != unidad_eliminar]
-
-            ws.clear()
-            ws.append_row(["Unidad"])
-
-            for _, row in df.iterrows():
-                ws.append_row(row.tolist())
-
-            st.success("Unidad de Medida eliminada correctamente")
+            st.success("Unidad eliminada")
             st.cache_data.clear()
             st.rerun()
 
@@ -469,179 +528,183 @@ elif menu == "📜 Historial":
 
     if not df_mov.empty:
 
-        st.subheader("📜 Historial de movimientos")
+        # 🔘 Mostrar eliminados
+        mostrar_eliminados = st.checkbox("Mostrar movimientos eliminados", value=False)
 
-        # 🔥 OPCIONAL PRO
-        mostrar_eliminados = st.checkbox(
-            "Mostrar movimientos eliminados",
-            key="chk_show_deleted"
-        )
+        df = df_mov.copy()
 
-        if "estado" in df_mov.columns:
-            if mostrar_eliminados:
-                df_view = df_mov
-            else:
-                df_view = df_mov[df_mov["estado"] != "ELIMINADO"]
-        else:
-            df_view = df_mov
+        # 🔥 FILTRO ESTADO (solo visual)
+        if "estado" in df.columns and not mostrar_eliminados:
+            df = df[df["estado"] != "ELIMINADO"]
 
-        st.dataframe(df_view, width="stretch")
+        # 🔥 NORMALIZAR
+        df["producto"] = df["producto"].astype(str).str.strip().str.lower()
 
-        columnas_correctas = [
-            "fecha",
-            "id_producto",
-            "producto",
-            "accion",
-            "cantidad",
-            "monto_total",
-            "nota"
-        ]
+        # 🔥 ORDEN
+        df = df.sort_values("fecha")
 
-        df_view = df_mov.copy()
+        resultados = []
 
-        # 🔥 ordenar por fecha
-        df_view = df_view.sort_values("fecha")
+        productos = df["producto"].unique()
 
-        # 🔥 limpiar datos
-        df_view["producto"] = df_view["producto"].astype(str).str.strip().str.lower()
-        df_view["cantidad"] = pd.to_numeric(df_view["cantidad"], errors="coerce").fillna(0)
-        df_view["monto_total"] = pd.to_numeric(df_view["monto_total"], errors="coerce").fillna(0)
+        for prod in productos:
 
-        # 🔥 estructuras por producto
-        stock_dict = {}
-        valor_dict = {}
-        cpp_list = []
+            df_p = df[df["producto"] == prod]
 
-        for _, row in df_view.iterrows():
+            stock = 0
+            valor = 0
+            cpp = 0
 
-            prod = row["producto"]
+            for _, row in df_p.iterrows():
 
-            # inicializar si no existe
-            if prod not in stock_dict:
-                stock_dict[prod] = 0
-                valor_dict[prod] = 0
+                cantidad = float(pd.to_numeric(row["cantidad"], errors="coerce") or 0)
+                monto = float(pd.to_numeric(row["monto_total"], errors="coerce") or 0)
+                accion = str(row["accion"]).strip().lower()
+                estado = row.get("estado", "OK")
 
-            stock = stock_dict[prod]
-            valor = valor_dict[prod]
+                # 🔥 ignorar eliminados en cálculo
+                if estado == "ELIMINADO":
+                    continue
 
-            if row["accion"] == "Ingreso":
-                stock += row["cantidad"]
-                valor += row["monto_total"]
+                if accion == "ingreso":
+                    stock += cantidad
+                    valor += monto
+                    cpp = valor / stock if stock > 0 else 0
 
-            elif row["accion"] == "Salida":
-                cpp_actual = valor / stock if stock > 0 else 0
-                stock -= row["cantidad"]
-                valor -= row["cantidad"] * cpp_actual
+                elif accion == "salida":
+                    costo = cantidad * cpp
 
-            # guardar estado actualizado
-            stock_dict[prod] = stock
-            valor_dict[prod] = valor
+                    stock -= cantidad
+                    valor -= costo
 
-            cpp_actual = valor / stock if stock > 0 else 0
-            cpp_list.append(cpp_actual)
+                    monto = costo  # 🔥 FIX CLAVE
 
-        df_view["cpp"] = cpp_list
+                    cpp = valor / stock if stock > 0 else 0
 
-        # 🔥 orden columnas
-        columnas = [
-            "fecha",
-            "id_producto",
-            "producto",
-            "accion",
-            "cantidad",
-            "monto_total",
-            "cpp",
-            "nota"
-        ]
+                resultados.append({
+                    "fecha": row["fecha"],
+                    "producto": row["producto"],
+                    "accion": row["accion"],
+                    "cantidad": cantidad,
+                    "monto_total": monto,
+                    "cpp": cpp,
+                    "nota": row["nota"],
+                    "estado": estado
+                })
 
-        df_view = df_view[[c for c in columnas if c in df_view.columns]]
+        df_final = pd.DataFrame(resultados)
 
-        df_view_format = df_view.copy()
-
+        # 💰 FORMATO MONEDA
         for col in ["monto_total", "cpp"]:
-            if col in df_view_format.columns:
-                df_view_format[col] = df_view_format[col].apply(
-                    lambda x: f"${x:,.0f}".replace(",", ".") if pd.notna(x) else ""
-                )
-
-        st.dataframe(df_view_format, width="stretch")
-
-        st.subheader("🗑️ Anular movimiento")
-
-        if not df_mov.empty:
-
-            idx = st.number_input(
-                "Índice del movimiento a eliminar",
-                min_value=0,
-                max_value=len(df_mov) - 1,
-                step=1
+            df_final[col] = df_final[col].apply(
+                lambda x: f"${x:,.0f}".replace(",", ".") if pd.notna(x) else ""
             )
 
-            confirmar = st.checkbox("Confirmar eliminación", key="chk_del_mov")
+        # 📊 TABLA
+        st.dataframe(df_final, width="stretch")
 
-            if st.button("Eliminar movimiento", key="btn_del_mov"):
+        # ========================
+        # 🗑️ GESTIÓN DE ELIMINACIÓN
+        # ========================
 
-                if not confirmar:
-                    st.warning("Debes confirmar")
-                    st.stop()
+        if "modo_eliminar" not in st.session_state:
+            st.session_state["modo_eliminar"] = False
 
-                ws = sheet.worksheet("movimientos")
+        if st.button("🗑️ Gestionar movimientos"):
+            st.session_state["modo_eliminar"] = not st.session_state["modo_eliminar"]
 
-                values = ws.get_all_values()
-                headers = values[0]
-                rows = values[1:]
+        if st.session_state["modo_eliminar"]:
 
-                if "Estado" not in headers:
-                    st.error("Falta columna Estado en la hoja")
-                    st.stop()
+            st.divider()
+            st.subheader("Eliminar movimiento")
 
-                estado_idx = headers.index("Estado")
+            df_sel = df_mov.copy()
 
-                rows[idx][estado_idx] = "ELIMINADO"
+            if "estado" in df_sel.columns and not mostrar_eliminados:
+                df_sel = df_sel[df_sel["estado"] != "ELIMINADO"]
 
-                ws.clear()
-                ws.append_row(headers)
-                for r in rows:
-                    ws.append_row(r)
+            # 🔥 NO resetear índice
+            df_sel["row_number"] = df_sel.index + 2
+            df_sel["id_mov"] = df_sel.index.astype(str)
 
-                st.success("Movimiento anulado")
-                st.cache_data.clear()
-                st.rerun()
+            # 🔥 mantener índice original para borrar bien
+            df_sel["original_index"] = df_sel.index
 
-                st.divider()
-                st.subheader("🗑️ Eliminar movimiento")
+            if not mostrar_eliminados:
+                df_sel = df_sel[df_sel["estado"] != "ELIMINADO"]
 
-                # Crear identificador único
-                df_mov["id_mov"] = df_mov.index.astype(str)
+            df_sel = df_sel.reset_index(drop=True)
+            df_sel["id_mov"] = df_sel.index.astype(str)
 
-                mov_seleccionado = st.selectbox(
-                    "Seleccionar movimiento",
-                    df_mov["id_mov"],
-                    format_func=lambda
-                        x: f"{df_mov.loc[int(x), 'fecha']} | {df_mov.loc[int(x), 'producto']} | {df_mov.loc[int(x), 'accion']} | {df_mov.loc[int(x), 'cantidad']}"
+            if "estado" in df_sel.columns:
+                df_sel = df_sel[df_sel["estado"] != "ELIMINADO"]
+
+            if df_sel.empty:
+                st.info("No hay movimientos disponibles para eliminar")
+                st.stop()
+
+            df_sel["id_mov"] = df_sel.index.astype(str)
+
+
+            def format_movimiento(row):
+                monto = pd.to_numeric(row["monto_total"], errors="coerce")
+
+                if pd.notna(monto):
+                    monto_fmt = f"${monto:,.0f}".replace(",", ".")
+                else:
+                    monto_fmt = "$0"
+
+                return (
+                    f"{row['fecha']} | "
+                    f"{row['producto']} | "
+                    f"{row['accion']} | "
+                    f"{row['cantidad']} | "
+                    f"{monto_fmt} | "
+                    f"{row['nota']} | "
+                    f"{row['estado'] if 'estado' in row else 'OK'}"
                 )
 
-                confirmar = st.checkbox("Confirmar eliminación")
 
-                if st.button("Eliminar movimiento"):
+            def format_movimiento(row):
+                monto = pd.to_numeric(row["monto_total"], errors="coerce")
 
-                    if not confirmar:
-                        st.warning("Debes confirmar la eliminación")
-                        st.stop()
+                if pd.notna(monto):
+                    monto_fmt = f"${monto:,.0f}".replace(",", ".")
+                else:
+                    monto_fmt = "$0"
 
-                    fila = int(mov_seleccionado)
+                return (
+                    f"{row['fecha']} | "
+                    f"{row['producto']} | "
+                    f"{row['accion']} | "
+                    f"{row['cantidad']} | "
+                    f"{monto_fmt} | "
+                    f"{row['nota']} | "
+                    f"{row['estado'] if 'estado' in row else 'OK'}"
+                )
+
+            mov = st.selectbox(
+                "Movimiento",
+                df_sel["id_mov"],
+                format_func=lambda x: format_movimiento(df_sel.loc[int(x)])
+            )
+
+            st.warning("¿Seguro que quieres eliminar este movimiento?")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                if st.button("✅ Sí, eliminar"):
+                    row_number = int(df_sel.loc[int(mov), "row_number"])
 
                     ws = sheet.worksheet("movimientos")
 
-                    # +2 porque:
-                    # fila 1 = headers
-                    # index 0 = fila 2
-                    row_number = fila + 2
-
-                    col_estado = 8  # columna Estado
-
-                    ws.update_cell(row_number, col_estado, "ELIMINADO")
+                    ws.update_cell(row_number, 8, "ELIMINADO")
 
                     st.success("Movimiento eliminado")
                     st.cache_data.clear()
                     st.rerun()
+
+            with col2:
+                if st.button("❌ Cancelar"):
+                    st.info("Operación cancelada")

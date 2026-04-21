@@ -107,7 +107,8 @@ def crear_producto(sheet, nombre, categoria, unidad, stock_minimo):
         nombre,
         categoria,
         unidad,
-        stock_minimo
+        stock_minimo,
+        "OK"
     ])
 
     return True, "Producto creado"
@@ -125,7 +126,8 @@ def crear_categoria(sheet, nombre, emoji):
 
     ws.append_row([
         nombre,
-        emoji
+        emoji,
+        "OK"
     ])
 
     return True, "Categoría creada"
@@ -141,7 +143,10 @@ def crear_unidad(sheet, nombre):
 
     ws = _get_ws(sheet, "unidades")
 
-    ws.append_row([nombre])
+    ws.append_row([
+        nombre,
+        "OK"
+    ])
 
     return True, "Unidad creada"
 
